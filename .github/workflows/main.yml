@@ -2,34 +2,38 @@ name: Build APK
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
+      # Works whether the project sits at the repo root or in a ReelRecipes/ folder.
+      - name: Find the Android project
+        run: |
+          if [ -f ReelRecipes/settings.gradle.kts ]; then echo "PROJECT_DIR=ReelRecipes" >> "$GITHUB_ENV";
+          else echo "PROJECT_DIR=." >> "$GITHUB_ENV"; fi
+
+      - uses: actions/setup-java@v4
         with:
-          java-version: '17'
-          distribution: 'temurin'
-          cache: gradle
+          distribution: temurin
+          java-version: "17"
 
-      - name: Make gradlew executable
-        working-directory: ./ReelRecipes
-        run: chmod +x ./gradlew
+      - uses: android-actions/setup-android@v3
 
-      - name: Build APK
-        working-directory: ./ReelRecipes
-        run: ./gradlew assembleDebug
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      # Installs Gradle 8.9 directly, so the gradlew / gradle-wrapper.jar files aren't needed.
+      - uses: gradle/actions/setup-gradle@v4
         with:
-          name: app-debug.apk
-          path: ReelRecipes/app/build/outputs/apk/debug/app-debug.apk
+          gradle-version: "8.9"
+
+      - name: Build debug APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reel-recipes-apk
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
