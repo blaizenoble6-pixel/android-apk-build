@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.ReelRecipes" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">#F1F4EE</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowBackground">@color/bg</item>
+    </style>
+    <color name="bg">#F1F4EE</color>
+    <color name="icon_bg">#2E6A4E</color>
+</resources>
