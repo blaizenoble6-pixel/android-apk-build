@@ -11,14 +11,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Find Android project
-        run: |
-          if [ -f ReelRecipes/settings.gradle.kts ]; then
-            echo "PROJECT_DIR=ReelRecipes" >> "$GITHUB_ENV"
-          else
-            echo "PROJECT_DIR=." >> "$GITHUB_ENV"
-          fi
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -29,11 +21,10 @@ jobs:
           gradle-version: "8.9"
 
       - name: Build debug APK
-        working-directory: ${{ env.PROJECT_DIR }}
         run: gradle assembleDebug --no-daemon --stacktrace
 
       - uses: actions/upload-artifact@v4
         with:
           name: reel-recipes-apk
-          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
