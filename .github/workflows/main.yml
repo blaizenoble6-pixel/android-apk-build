@@ -7,23 +7,23 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
-      # Works whether the project sits at the repo root or in a ReelRecipes/ folder.
-      - name: Find the Android project
+      - name: Find Android project
         run: |
-          if [ -f ReelRecipes/settings.gradle.kts ]; then echo "PROJECT_DIR=ReelRecipes" >> "$GITHUB_ENV";
-          else echo "PROJECT_DIR=." >> "$GITHUB_ENV"; fi
+          if [ -f ReelRecipes/settings.gradle.kts ]; then
+            echo "PROJECT_DIR=ReelRecipes" >> "$GITHUB_ENV"
+          else
+            echo "PROJECT_DIR=." >> "$GITHUB_ENV"
+          fi
 
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      - uses: android-actions/setup-android@v3
-
-      # Installs Gradle 8.9 directly, so the gradlew / gradle-wrapper.jar files aren't needed.
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
