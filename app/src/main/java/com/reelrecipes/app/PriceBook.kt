@@ -115,6 +115,19 @@ class PriceBook(context: Context) {
         m
     }
 
+    /** Every price known at [store], as JSON the Reel Recipes web page can import. */
+    fun exportJson(store: StoreRef = this.store): String {
+        val prefix = "${store.chain}|${store.id}|"
+        val arr = JSONArray()
+        matches.filterKeys { it.startsWith(prefix) }.forEach { (k, p) ->
+            arr.put(JSONObject().put("key", k.removePrefix(prefix)).put("name", p.displayName).put("price", p.price)
+                .put("size", if (p.byWeight) "per kg" else p.sizeText).put("byWeight", p.byWeight).put("store", store.label))
+        }
+        return arr.toString()
+    }
+
+    fun count(store: StoreRef = this.store) = matches.keys.count { it.startsWith("${store.chain}|${store.id}|") }
+
     /** Search results for the product picker. */
     suspend fun options(store: StoreRef, query: String): List<Product> = Grocery.search(store, query, 24)
 }

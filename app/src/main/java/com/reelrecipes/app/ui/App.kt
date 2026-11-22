@@ -627,6 +627,14 @@ private fun StoresSection(prices: PriceBook) {
             testOut = lines.joinToString("\n\n"); testing = false
         }
     }) { Text(if (testing) "Testing…" else "Test prices") }
+    val ctx = LocalContext.current
+    OutlinedButton(onClick = {
+        val n = prices.count(main)
+        if (n == 0) { Toast.makeText(ctx, "No prices yet. Open a recipe first so its prices load.", Toast.LENGTH_LONG).show(); return@OutlinedButton }
+        val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("Reel Recipes prices", prices.exportJson(main)))
+        Toast.makeText(ctx, "Copied $n prices. Paste them in the web app under ⚙ → Import prices.", Toast.LENGTH_LONG).show()
+    }) { Text("Copy prices for the web app") }
     if (testOut.isNotBlank()) androidx.compose.foundation.text.selection.SelectionContainer {
         Text(testOut, fontFamily = Mono, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(10.dp))
     }
