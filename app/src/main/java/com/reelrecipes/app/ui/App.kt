@@ -31,6 +31,9 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -60,66 +63,123 @@ sealed interface Photo {
     class Pending(val jpeg: ByteArray) : Photo
 }
 
+private enum class Tab(val label: String) { RECIPES("Recipes"), PLAN("Plan"), SHOP("Shopping") }
+
 private sealed interface Screen {
-    data object Shelf : Screen
+    data object Home : Screen
     data class View(val id: String) : Screen
     data class Import(val shared: Shared?) : Screen
     data class Edit(val recipe: Recipe, val photos: List<Photo>, val note: String, val isNew: Boolean) : Screen
     data object Settings : Screen
     data class SignIn(val back: Screen) : Screen
+    data class Cook(val dishes: List<Pair<String, Int>>, val back: Screen) : Screen
 }
 
 @Composable
-fun App(store: RecipeStore, incoming: Shared?, onIncomingHandled: () -> Unit) {
-    var screen by remember { mutableStateOf<Screen>(Screen.Shelf) }
+fun App(store: RecipeStore, prices: PriceBook, plan: PlanStore, incoming: Shared?, onIncomingHandled: () -> Unit) {
+    var screen by remember { mutableStateOf<Screen>(Screen.Home) }
+    var tab by rememberSaveable { mutableStateOf(Tab.RECIPES) }
+    var week by remember { mutableStateOf(PlanStore.weekStart()) }
     val recipes by store.recipes.collectAsState()
 
     LaunchedEffect(incoming?.stamp) {
         if (incoming != null) { screen = Screen.Import(incoming); onIncomingHandled() }
     }
-    BackHandler(enabled = screen != Screen.Shelf) {
+    BackHandler(enabled = screen != Screen.Home || tab != Tab.RECIPES) {
         screen = when (val s = screen) {
-            is Screen.Edit -> if (s.isNew) Screen.Shelf else Screen.View(s.recipe.id)
+            Screen.Home -> { tab = Tab.RECIPES; Screen.Home }
+            is Screen.Edit -> if (s.isNew) (if (s.recipe.parentId.isNotBlank()) Screen.View(s.recipe.parentId) else Screen.Home) else Screen.View(s.recipe.id)
             is Screen.SignIn -> s.back
-            else -> Screen.Shelf
+            is Screen.Cook -> s.back
+            else -> Screen.Home
         }
     }
 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         when (val s = screen) {
-            Screen.Shelf -> ShelfScreen(recipes, store,
-                onOpen = { screen = Screen.View(it) },
-                onAdd = { screen = Screen.Import(null) },
-                onSettings = { screen = Screen.Settings })
+            Screen.Home -> Scaffold(
+                containerColor = MaterialTheme.colorScheme.background,
+                bottomBar = {
+                    NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                        Tab.entries.forEach { t ->
+                            NavigationBarItem(selected = tab == t, onClick = { tab = t }, label = { Text(t.label) }, icon = {
+                                Icon(when (t) { Tab.RECIPES -> Icons.Default.Home; Tab.PLAN -> Icons.Default.DateRange; Tab.SHOP -> Icons.Default.ShoppingCart }, null)
+                            })
+                        }
+                    }
+                },
+            ) { pad ->
+                Box(Modifier.padding(bottom = pad.calculateBottomPadding())) {
+                    when (tab) {
+                        Tab.RECIPES -> ShelfScreen(recipes, store, prices,
+                            onOpen = { screen = Screen.View(it) },
+                            onAdd = { screen = Screen.Import(null) },
+                            onSettings = { screen = Screen.Settings })
+                        Tab.PLAN -> PlanScreen(recipes, plan, prices, week, { week = it },
+                            onOpen = { screen = Screen.View(it) },
+                            onCook = { screen = Screen.Cook(it, Screen.Home) },
+                            onShop = { tab = Tab.SHOP })
+                        Tab.SHOP -> ShopScreen(recipes, plan, prices, week) { week = it }
+                    }
+                }
+            }
             is Screen.View -> {
                 val r = recipes.firstOrNull { it.id == s.id }
-                if (r == null) LaunchedEffect(Unit) { screen = Screen.Shelf }
-                else RecipeScreen(r, store,
-                    onBack = { screen = Screen.Shelf },
-                    onEdit = { screen = Screen.Edit(r, r.photos.map { Photo.Saved(it) }, "", false) })
+                if (r == null) LaunchedEffect(Unit) { screen = Screen.Home }
+                else RecipeScreen(r, recipes, store, prices, plan,
+                    onBack = { screen = Screen.Home },
+                    onEdit = { screen = Screen.Edit(r, r.photos.map { Photo.Saved(it) }, "", false) },
+                    onOpen = { screen = Screen.View(it) },
+                    onNewVariation = { v -> screen = Screen.Edit(v, v.photos.map { Photo.Saved(it) }, "Change whatever you like. The original stays as it was.", true) },
+                    onCook = { screen = Screen.Cook(it, Screen.View(r.id)) })
             }
             is Screen.Import -> ImportScreen(s.shared, store,
-                onCancel = { screen = Screen.Shelf },
+                onCancel = { screen = Screen.Home },
                 onDraft = { recipe, photos, note -> screen = Screen.Edit(recipe, photos, note, true) },
                 onSignIn = { screen = Screen.SignIn(Screen.Import(s.shared)) })
             is Screen.Edit -> EditScreen(s, store,
-                onBack = { screen = if (s.isNew) Screen.Shelf else Screen.View(s.recipe.id) },
+                onBack = { screen = if (s.isNew) (if (s.recipe.parentId.isNotBlank()) Screen.View(s.recipe.parentId) else Screen.Home) else Screen.View(s.recipe.id) },
                 onSaved = { screen = Screen.View(it) })
-            Screen.Settings -> SettingsScreen(store, onBack = { screen = Screen.Shelf }, onSignIn = { screen = Screen.SignIn(Screen.Settings) })
+            Screen.Settings -> SettingsScreen(store, prices, onBack = { screen = Screen.Home }, onSignIn = { screen = Screen.SignIn(Screen.Settings) })
             is Screen.SignIn -> InstagramSignInScreen(onDone = { screen = s.back })
+            is Screen.Cook -> {
+                val dishes = s.dishes.mapNotNull { (id, n) -> recipes.firstOrNull { it.id == id }?.let { it to n } }
+                CookScreen(dishes, onBack = { screen = s.back })
+            }
         }
     }
 }
 
 // ---------------------------------------------------------------- Shelf
 
+private enum class Sort(val label: String) { NEWEST("Newest"), CHEAPEST("Cheapest a serve"), QUICKEST("Quickest"), AZ("A–Z") }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ShelfScreen(recipes: List<Recipe>, store: RecipeStore, onOpen: (String) -> Unit, onAdd: () -> Unit, onSettings: () -> Unit) {
+private fun ShelfScreen(recipes: List<Recipe>, store: RecipeStore, prices: PriceBook, onOpen: (String) -> Unit, onAdd: () -> Unit, onSettings: () -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
     var tag by rememberSaveable { mutableStateOf<String?>(null) }
-    val tags = remember(recipes) { recipes.flatMap { it.tags }.distinct().sorted() }
-    val shown = recipes.filter { (tag == null || tag in it.tags) && it.matches(query) }
+    var maxMin by rememberSaveable { mutableStateOf<Int?>(null) }
+    var maxCost by rememberSaveable { mutableStateOf<Double?>(null) }
+    var sort by rememberSaveable { mutableStateOf(Sort.NEWEST) }
+    var sortOpen by remember { mutableStateOf(false) }
+    val per by prices.perServe.collectAsState()
+    // Versions live inside their original; the shelf shows each recipe once.
+    val originals = recipes.filter { it.parentId.isBlank() || recipes.none { o -> o.id == it.parentId } }
+    val versions = recipes.groupBy { it.parentId }
+    val tags = remember(recipes) { recipes.flatMap { it.tags }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.map { it.key }.take(20) }
+    val shown = originals.filter { r ->
+        (tag == null || tag in r.tags) && (r.matches(query) || versions[r.id].orEmpty().any { it.matches(query) }) &&
+            (maxMin == null || (r.minutes ?: Int.MAX_VALUE) <= maxMin!!) &&
+            (maxCost == null || (per[r.id] ?: Double.MAX_VALUE) <= maxCost!!)
+    }.let { l ->
+        when (sort) {
+            Sort.NEWEST -> l.sortedByDescending { it.createdAt }
+            Sort.CHEAPEST -> l.sortedBy { per[it.id] ?: Double.MAX_VALUE }
+            Sort.QUICKEST -> l.sortedBy { it.minutes ?: Int.MAX_VALUE }
+            Sort.AZ -> l.sortedBy { it.title.lowercase() }
+        }
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -137,7 +197,7 @@ private fun ShelfScreen(recipes: List<Recipe>, store: RecipeStore, onOpen: (Stri
     ) { pad ->
         LazyVerticalGrid(
             columns = GridCells.Adaptive(150.dp),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = pad.calculateTopPadding(), bottom = pad.calculateBottomPadding() + 96.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = pad.calculateTopPadding(), bottom = 96.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -145,6 +205,20 @@ private fun ShelfScreen(recipes: List<Recipe>, store: RecipeStore, onOpen: (Stri
                 OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true,
                     placeholder = { Text("Search recipes or ingredients") },
                     leadingIcon = { Icon(Icons.Default.Search, null) }, shape = RoundedCornerShape(50))
+            }
+            if (recipes.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    item {
+                        Box {
+                            AssistChip(onClick = { sortOpen = true }, label = { Text("Sort: ${sort.label}") })
+                            DropdownMenu(sortOpen, { sortOpen = false }) {
+                                Sort.entries.forEach { o -> DropdownMenuItem(text = { Text(o.label) }, onClick = { sort = o; sortOpen = false }) }
+                            }
+                        }
+                    }
+                    items(listOf(20, 30, 45)) { m -> FilterChip(maxMin == m, { maxMin = if (maxMin == m) null else m }, { Text("≤ $m min") }) }
+                    items(listOf(3.0, 5.0, 8.0)) { c -> FilterChip(maxCost == c, { maxCost = if (maxCost == c) null else c }, { Text("≤ $${c.toInt()}/serve") }) }
+                }
             }
             if (tags.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -154,9 +228,10 @@ private fun ShelfScreen(recipes: List<Recipe>, store: RecipeStore, onOpen: (Stri
             }
             if (recipes.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) { EmptyShelf() }
             else if (shown.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
-                Text("No recipes match that.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(24.dp))
+                Text(if (maxCost != null && per.isEmpty()) "Costs show up once you've opened a recipe and its prices have loaded." else "No recipes match that.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(24.dp))
             }
-            items(shown, key = { it.id }) { r -> RecipeCard(r, store) { onOpen(r.id) } }
+            items(shown, key = { it.id }) { r -> RecipeCard(r, store, per[r.id], versions[r.id]?.size ?: 0) { onOpen(r.id) } }
         }
     }
 }
@@ -183,7 +258,7 @@ private fun EmptyShelf() {
 }
 
 @Composable
-private fun RecipeCard(r: Recipe, store: RecipeStore, onClick: () -> Unit) {
+private fun RecipeCard(r: Recipe, store: RecipeStore, perServe: Double?, versions: Int, onClick: () -> Unit) {
     Card(onClick = onClick, shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)) {
@@ -191,137 +266,13 @@ private fun RecipeCard(r: Recipe, store: RecipeStore, onClick: () -> Unit) {
             val cover = r.photos.firstOrNull()
             if (cover != null) AsyncImage(store.photo(cover), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             else Text(r.title.take(1).uppercase(), fontFamily = Mono, fontSize = 32.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (perServe != null) Box(Modifier.align(Alignment.TopEnd).padding(8.dp)) { Pill(Costing.money(perServe) + "/serve", strong = true) }
         }
         Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 12.dp)) {
             Text(r.title.ifBlank { "Untitled" }, fontFamily = Display, fontSize = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            val by = listOf(r.author, r.time).filter { it.isNotBlank() }.joinToString(" · ")
+            val by = listOfNotNull(r.author.takeIf { it.isNotBlank() }, r.time.takeIf { it.isNotBlank() }, versions.takeIf { it > 0 }?.let { "+$it version${if (it > 1) "s" else ""}" }).joinToString(" · ")
             if (by.isNotEmpty()) Text(by, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-    }
-}
-
-// ---------------------------------------------------------------- Recipe
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun RecipeScreen(r: Recipe, store: RecipeStore, onBack: () -> Unit, onEdit: () -> Unit) {
-    val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var confirmDelete by remember { mutableStateOf(false) }
-    val checked = remember(r.id) { mutableStateMapOf<Int, Boolean>() }
-
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
-            TopAppBar(
-                title = {},
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
-                actions = {
-                    IconButton(onClick = onEdit) { Icon(Icons.Default.Edit, "Edit") }
-                    IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Default.Delete, "Delete") }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
-            )
-        },
-    ) { pad ->
-        Column(Modifier.padding(pad).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 40.dp)) {
-            r.photos.firstOrNull()?.let {
-                AsyncImage(store.photo(it), null, Modifier.fillMaxWidth().aspectRatio(4f / 3f).clip(RoundedCornerShape(14.dp)), contentScale = ContentScale.Crop)
-                Spacer(Modifier.height(14.dp))
-            }
-            Text(r.title.ifBlank { "Untitled" }, fontFamily = Display, fontSize = 30.sp, lineHeight = 34.sp)
-            val meta = listOfNotNull(
-                r.author.takeIf { it.isNotBlank() },
-                r.servings.takeIf { it.isNotBlank() }?.let { "Serves $it" },
-                r.time.takeIf { it.isNotBlank() },
-            )
-            if (meta.isNotEmpty()) Text(meta.joinToString("   "), color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
-            if (r.tags.isNotEmpty()) Row(Modifier.padding(top = 10.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                r.tags.forEach { Text(it, fontSize = 12.sp, modifier = Modifier.clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 10.dp, vertical = 3.dp)) }
-            }
-            if (r.url.isNotBlank()) {
-                OutlinedCard(
-                    onClick = { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(r.url))) } },
-                    modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-                ) {
-                    Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Original post", fontWeight = FontWeight.SemiBold)
-                            Text(r.url.removePrefix("https://www."), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                        Text("Watch ↗", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-
-            SectionHead("Ingredients", "Tick as you go")
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline)
-            r.ingredients.forEachIndexed { i, ing ->
-                val on = checked[i] == true
-                Row(
-                    Modifier.fillMaxWidth().clickable { checked[i] = !on }.padding(vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Checkbox(on, { checked[i] = it })
-                    Text(ing.qty, fontFamily = Mono, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.width(78.dp))
-                    Text(
-                        if (ing.note.isBlank()) ing.item else "${ing.item}, ${ing.note}",
-                        modifier = Modifier.weight(1f),
-                        textDecoration = if (on) TextDecoration.LineThrough else null,
-                        color = if (on) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onBackground,
-                    )
-                }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
-            }
-
-            SectionHead("Method", "${r.steps.size} steps")
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                r.steps.forEachIndexed { i, step ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("%02d".format(i + 1), fontFamily = Mono, fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.onSecondary,
-                            modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.secondary).padding(horizontal = 6.dp, vertical = 2.dp))
-                        Text(step, modifier = Modifier.weight(1f))
-                    }
-                }
-            }
-
-            if (r.notes.isNotBlank()) {
-                SectionHead("Notes", "")
-                Text(r.notes, Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(14.dp)).padding(14.dp))
-            }
-            if (r.photos.size > 1) {
-                SectionHead("Reference shots", "${r.photos.size}")
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(r.photos) { AsyncImage(store.photo(it), null, Modifier.height(200.dp).clip(RoundedCornerShape(10.dp)), contentScale = ContentScale.FillHeight) }
-                }
-            }
-        }
-    }
-
-    if (confirmDelete) AlertDialog(
-        onDismissRequest = { confirmDelete = false },
-        title = { Text("Delete this recipe?") },
-        text = { Text("Its photos are deleted too.") },
-        confirmButton = {
-            TextButton({
-                confirmDelete = false
-                scope.launch {
-                    store.delete(r.id)
-                    Toast.makeText(ctx, "Recipe deleted", Toast.LENGTH_SHORT).show()
-                    onBack()
-                }
-            }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
-        },
-        dismissButton = { TextButton({ confirmDelete = false }) { Text("Keep it") } },
-    )
-}
-
-@Composable
-private fun SectionHead(title: String, aside: String) {
-    Row(Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 10.dp), verticalAlignment = Alignment.Bottom) {
-        Text(title, fontFamily = Display, fontSize = 21.sp, modifier = Modifier.weight(1f))
-        Text(aside, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -595,7 +546,7 @@ private fun EditScreen(s: Screen.Edit, store: RecipeStore, onBack: () -> Unit, o
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SettingsScreen(store: RecipeStore, onBack: () -> Unit, onSignIn: () -> Unit) {
+private fun SettingsScreen(store: RecipeStore, prices: PriceBook, onBack: () -> Unit, onSignIn: () -> Unit) {
     val ctx = LocalContext.current
     var key by remember { mutableStateOf(store.apiKey) }
     var signedIn by remember { mutableStateOf(PostReader.isSignedIn()) }
@@ -608,6 +559,8 @@ private fun SettingsScreen(store: RecipeStore, onBack: () -> Unit, onSignIn: () 
         },
     ) { pad ->
         Column(Modifier.padding(pad).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            StoresSection(prices)
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 8.dp))
             Text("Instagram", fontFamily = Display, fontSize = 20.sp)
             Text(if (signedIn) "Signed in. Reel Recipes can open posts and reels the way your browser does."
                  else "Optional, but recommended. Instagram shows less to signed-out visitors, so signing in once makes captions and photos come through for far more posts.",
@@ -631,5 +584,77 @@ private fun SettingsScreen(store: RecipeStore, onBack: () -> Unit, onSignIn: () 
             }
             Text("The key is stored only on this phone and is sent only to api.anthropic.com.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+    }
+}
+
+@Composable
+private fun StoresSection(prices: PriceBook) {
+    val scope = rememberCoroutineScope()
+    var main by remember { mutableStateOf(prices.store) }
+    var others by remember { mutableStateOf(prices.compare) }
+    var adding by remember { mutableStateOf<Chain?>(null) }
+    var testing by remember { mutableStateOf(false) }
+    var testOut by remember { mutableStateOf("") }
+    fun save() { prices.store = main; prices.compare = others.filter { it != main } }
+
+    Text("Supermarket prices", fontFamily = Display, fontSize = 20.sp)
+    Muted("Meal costs use live prices from your main store. Add more stores to compare shopping lists. Prices come from the supermarkets' own websites and apps, so a store can stop working if it changes its site; you can always type a price in by hand.", 14)
+    (listOf(main) + others.filter { it != main }).forEach { s ->
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            RadioButton(selected = s == main, onClick = { main = s; others = (others + prices.store).distinct().filter { it != s }; save() })
+            Column(Modifier.weight(1f)) {
+                Text(s.label)
+                Muted(if (s == main) "Main store" else "Compare", 12)
+            }
+            if (s != main) IconButton(onClick = { others = others - s; save() }) { Icon(Icons.Default.Close, "Remove store") }
+        }
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Chain.entries.forEach { c -> AssistChip(onClick = {
+            if (c == Chain.WOOLWORTHS) { val w = StoreRef(Chain.WOOLWORTHS, "", "Woolworths (online prices)"); if (w != main && w !in others) { others = others + w; save() } }
+            else adding = c
+        }, label = { Text("+ ${c.label}") }) }
+    }
+    OutlinedButton(enabled = !testing, onClick = {
+        testing = true; testOut = ""
+        scope.launch {
+            val lines = prices.allStores.map { st ->
+                runCatching { Grocery.search(st, "milk", 5) }.fold(
+                    { r -> if (r.isEmpty()) "${st.label}: connected, but no products came back." else "${st.label}: working. e.g. ${r.first().displayName} ${Costing.money(r.first().price)}" },
+                    { e -> "${st.label}: ${e.message}\n" + (Grocery.lastDebug[st.chain] ?: "").take(400) },
+                )
+            }
+            testOut = lines.joinToString("\n\n"); testing = false
+        }
+    }) { Text(if (testing) "Testing…" else "Test prices") }
+    if (testOut.isNotBlank()) androidx.compose.foundation.text.selection.SelectionContainer {
+        Text(testOut, fontFamily = Mono, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(10.dp))
+    }
+
+    adding?.let { chain ->
+        var list by remember(chain) { mutableStateOf<List<StoreRef>>(emptyList()) }
+        var err by remember(chain) { mutableStateOf<String?>(null) }
+        var q by remember(chain) { mutableStateOf("") }
+        LaunchedEffect(chain) { runCatching { Grocery.stores(chain) }.onSuccess { list = it }.onFailure { err = it.message } }
+        AlertDialog(
+            onDismissRequest = { adding = null },
+            title = { Text("Choose your ${chain.label}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(q, { q = it }, Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("Search, e.g. Mt Albert") })
+                    if (list.isEmpty() && err == null) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    err?.let { Text(it + "\n\n" + (Grocery.lastDebug[chain] ?: "").take(300), color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
+                    androidx.compose.foundation.lazy.LazyColumn(Modifier.heightIn(max = 360.dp)) {
+                        items(list.filter { it.name.contains(q, true) }) { st ->
+                            Text(st.name, Modifier.fillMaxWidth().clickable {
+                                if (st != main && st !in others) { others = others + st; save() }
+                                adding = null
+                            }.padding(vertical = 12.dp))
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { adding = null }) { Text("Close") } },
+        )
     }
 }

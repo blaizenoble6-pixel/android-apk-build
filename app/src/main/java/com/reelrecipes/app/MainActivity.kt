@@ -21,10 +21,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val store = RecipeStore(applicationContext)
+        val prices = PriceBook(applicationContext)
+        val plan = PlanStore(applicationContext)
         if (savedInstanceState == null) incoming.value = readShare(intent)
         setContent {
             ReelTheme {
-                App(store = store, incoming = incoming.value, onIncomingHandled = { incoming.value = null })
+                App(store = store, prices = prices, plan = plan, incoming = incoming.value, onIncomingHandled = { incoming.value = null })
             }
         }
     }

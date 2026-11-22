@@ -12,8 +12,8 @@ android {
         applicationId = "com.reelrecipes.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 3
+        versionName = "2.0"
     }
 
     // A fixed signing key kept in the repo, so each new build installs over the old one
@@ -46,6 +46,9 @@ android {
     buildFeatures {
         compose = true
     }
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {
@@ -62,4 +65,5 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.7.0")
     // On-phone text recognition for screenshots and post photos (offline, model bundled in the app).
     implementation("com.google.mlkit:text-recognition:16.0.1")
+    testImplementation("junit:junit:4.13.2")
 }

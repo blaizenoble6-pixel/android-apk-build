@@ -20,7 +20,23 @@ data class Recipe(
     /** File names inside the app's photos folder; the first is the cover. */
     val photos: List<String> = emptyList(),
     val createdAt: Long = System.currentTimeMillis(),
+    /** Set on a variation: the recipe it was made from, and its short name ("Less spicy"). */
+    val parentId: String = "",
+    val variantName: String = "",
 ) {
+    /** How many the ingredient amounts are written for. Read from "Serves", assumed 2 when not stated. */
+    val baseServings: Int get() = Regex("\\d+").find(servings)?.value?.toIntOrNull()?.coerceIn(1, 50) ?: 2
+    val servingsStated: Boolean get() = Regex("\\d+").containsMatchIn(servings)
+
+    /** Total minutes from text like "35 min", "1 hr 10 min", "1.5 hours"; null when unknown. */
+    val minutes: Int? get() {
+        val t = time.lowercase()
+        val h = Regex("(\\d+(?:\\.\\d+)?)\\s*(?:h|hr|hrs|hour|hours)\\b").find(t)?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0
+        val m = Regex("(\\d+)\\s*(?:m|min|mins|minute|minutes)\\b").find(t)?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0
+        val total = h * 60 + m
+        return if (total > 0) total.toInt() else Regex("^\\s*(\\d+)\\s*$").find(t)?.groupValues?.get(1)?.toIntOrNull()
+    }
+
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id); put("title", title); put("author", author)
         put("servings", servings); put("time", time)
@@ -32,6 +48,7 @@ data class Recipe(
         put("notes", notes); put("url", url)
         put("photos", JSONArray(photos))
         put("createdAt", createdAt)
+        put("parentId", parentId); put("variantName", variantName)
     }
 
     fun matches(q: String): Boolean {
@@ -60,6 +77,8 @@ data class Recipe(
             url = o.optString("url"),
             photos = o.optJSONArray("photos").strings(),
             createdAt = o.optLong("createdAt", System.currentTimeMillis()),
+            parentId = o.optString("parentId"),
+            variantName = o.optString("variantName"),
         )
     }
 }

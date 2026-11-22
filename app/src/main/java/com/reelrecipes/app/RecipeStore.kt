@@ -50,12 +50,23 @@ class RecipeStore(context: Context) {
     suspend fun save(recipe: Recipe) = withContext(Dispatchers.IO) {
         val old = _recipes.value.firstOrNull { it.id == recipe.id }
         // Remove photos the user took off the recipe while editing.
-        old?.photos?.filterNot { it in recipe.photos }?.forEach { photo(it).delete() }
-        persist(_recipes.value.filterNot { it.id == recipe.id } + recipe)
+        val others = _recipes.value.filter { it.id != recipe.id }
+        old?.photos?.filterNot { it in recipe.photos }?.filter { p -> others.none { p in it.photos } }?.forEach { photo(it).delete() }
+        persist(others + recipe)
     }
 
     suspend fun delete(id: String) = withContext(Dispatchers.IO) {
-        _recipes.value.firstOrNull { it.id == id }?.photos?.forEach { photo(it).delete() }
-        persist(_recipes.value.filterNot { it.id == id })
+        val gone = _recipes.value.firstOrNull { it.id == id } ?: return@withContext
+        var rest = _recipes.value.filterNot { it.id == id }
+        // Photos shared with a version stay until nothing uses them.
+        gone.photos.filter { p -> rest.none { p in it.photos } }.forEach { photo(it).delete() }
+        // Deleting an original keeps its versions: the oldest version becomes the new original.
+        if (gone.parentId.isBlank()) {
+            val kids = rest.filter { it.parentId == id }.sortedBy { it.createdAt }
+            kids.firstOrNull()?.let { heir ->
+                rest = rest.map { r -> when { r.id == heir.id -> r.copy(parentId = "", variantName = ""); r.parentId == id -> r.copy(parentId = heir.id); else -> r } }
+            }
+        }
+        persist(rest)
     }
 }
