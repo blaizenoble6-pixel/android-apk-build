@@ -8,7 +8,9 @@
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
         android:label="@string/app_name"
-        android:theme="@style/Theme.ReelRecipes">
+        android:theme="@style/Theme.ReelRecipes"
+        android:usesCleartextTraffic="true">
+        <!-- Cleartext is only needed for Grocery Hub on the home network (http://PC-IP:8765); supermarkets and Claude use https. -->
 
         <activity
             android:name=".MainActivity"

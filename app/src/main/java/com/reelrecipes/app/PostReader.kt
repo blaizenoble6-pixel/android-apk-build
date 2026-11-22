@@ -25,15 +25,15 @@ data class ReadPost(val caption: String, val author: String, val imageUrls: List
  * and most posts readable.
  */
 object PostReader {
-    // Chrome-on-Android UA without the "; wv" WebView marker, which Instagram treats as a bot.
-    const val UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+    /** How the app identifies itself on plain web requests. It never pretends to be another browser or app. */
+    const val UA = "ReelRecipes/2.1 (Android; personal recipe app)"
 
     @SuppressLint("SetJavaScriptEnabled")
     fun newWebView(context: Context): WebView = WebView(context).apply {
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
         settings.mediaPlaybackRequiresUserGesture = true
-        settings.userAgentString = UA
+        // The WebView keeps its own standard identity (no disguise).
         settings.loadWithOverviewMode = true
         settings.useWideViewPort = true
         CookieManager.getInstance().setAcceptCookie(true)
@@ -68,7 +68,7 @@ object PostReader {
 
     private val http = OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).build()
 
-    /** Downloads post images with the same cookies and UA as the WebView. */
+    /** Downloads post images using the WebView's Instagram sign-in cookie. */
     suspend fun download(urls: List<String>, max: Int = 10): List<ByteArray> = withContext(Dispatchers.IO) {
         val cookies = CookieManager.getInstance().getCookie("https://www.instagram.com").orEmpty()
         urls.distinct().take(max).mapNotNull { u ->

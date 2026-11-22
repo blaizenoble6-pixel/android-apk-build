@@ -597,8 +597,26 @@ private fun StoresSection(prices: PriceBook) {
     var testOut by remember { mutableStateOf("") }
     fun save() { prices.store = main; prices.compare = others.filter { it != main } }
 
+    var hub by remember { mutableStateOf(prices.hubUrl) }
+    var hubMsg by remember { mutableStateOf("") }
+    Text("Grocery Hub", fontFamily = Display, fontSize = 20.sp)
+    Muted("Grocery Hub on your PC checks prices every morning at all your stores, including FreshChoice, The Warehouse and Costco (from receipts). Run run.bat on the PC, then enter its address here. Works on home Wi-Fi.", 14)
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(hub, { hub = it }, Modifier.weight(1f), singleLine = true, label = { Text("Address") }, placeholder = { Text("192.168.1.20:8765") })
+        Button(onClick = {
+            prices.hubUrl = hub; hubMsg = "Checking…"
+            scope.launch {
+                hubMsg = runCatching { Grocery.stores(Chain.HUB) }.fold(
+                    { l -> "Connected: ${l.size} stores. Add them below with + Grocery Hub." },
+                    { e -> e.message ?: "Couldn't connect" })
+            }
+        }) { Text("Save") }
+    }
+    if (hubMsg.isNotBlank()) Muted(hubMsg, 13)
+    HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 8.dp))
+
     Text("Supermarket prices", fontFamily = Display, fontSize = 20.sp)
-    Muted("Meal costs use live prices from your main store. Add more stores to compare shopping lists. Prices come from the supermarkets' own websites and apps, so a store can stop working if it changes its site; you can always type a price in by hand.", 14)
+    Muted("Meal costs use prices from your main store. Add more to compare shopping lists. Woolworths, Pak'nSave and New World are asked directly, the same way their websites ask. The app identifies itself honestly, so a store that doesn't allow apps may say no; then use its Grocery Hub prices or type a price in.", 14)
     (listOf(main) + others.filter { it != main }).forEach { s ->
         Row(verticalAlignment = Alignment.CenterVertically) {
             RadioButton(selected = s == main, onClick = { main = s; others = (others + prices.store).distinct().filter { it != s }; save() })
@@ -611,7 +629,7 @@ private fun StoresSection(prices: PriceBook) {
     }
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Chain.entries.forEach { c -> AssistChip(onClick = {
-            if (c == Chain.WOOLWORTHS) { val w = StoreRef(Chain.WOOLWORTHS, "", "Woolworths (online prices)"); if (w != main && w !in others) { others = others + w; save() } }
+            if (c == Chain.WOOLWORTHS) { val w = StoreRef(Chain.WOOLWORTHS, "", "Woolworths (national prices)"); if (w != main && w !in others) { others = others + w; save() } }
             else adding = c
         }, label = { Text("+ ${c.label}") }) }
     }

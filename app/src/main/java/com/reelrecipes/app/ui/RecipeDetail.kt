@@ -126,6 +126,13 @@ internal fun RecipeScreen(
                 OutlinedButton(onClick = { onCook(listOf(r.id to servings)) }, modifier = Modifier.weight(1f)) { Text("Cook mode") }
             }
 
+            if (prices.hubUrl.isNotBlank()) TextButton(onClick = {
+                scope.launch {
+                    val msg = runCatching { Grocery.sendRecipe(r) }.getOrElse { it.message ?: "Couldn't reach Grocery Hub" }
+                    Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
+                }
+            }) { Text("Track in Grocery Hub (daily prices and deal alerts)") }
+
             if (r.url.isNotBlank()) {
                 OutlinedCard(onClick = { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(r.url))) } }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
                     Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {

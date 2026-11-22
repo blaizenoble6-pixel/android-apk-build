@@ -33,16 +33,23 @@ class PriceBook(context: Context) {
 
     private val limiter = Semaphore(4)
 
-    init { load() }
+    init { load(); Grocery.hubUrl = hubUrl }
+
+    /** Grocery Hub on the home PC, e.g. http://192.168.1.20:8765. Blank = not used. */
+    var hubUrl: String
+        get() = prefs.getString("hub", "") ?: ""
+        set(v) { prefs.edit().putString("hub", v.trim()).apply(); Grocery.hubUrl = v.trim() }
 
     var store: StoreRef
-        get() = StoreRef.fromJson(prefs.getString("store", null)?.let { runCatching { JSONObject(it) }.getOrNull() }) ?: StoreRef(Chain.WOOLWORTHS, "", "Woolworths (online prices)")
+        get() = StoreRef.fromJson(prefs.getString("store", null)?.let { runCatching { JSONObject(it) }.getOrNull() })?.let(::tidy) ?: StoreRef(Chain.WOOLWORTHS, "", "Woolworths (national prices)")
         set(v) { prefs.edit().putString("store", v.toJson().toString()).apply() }
 
     /** Other stores to compare a shopping list against. */
     var compare: List<StoreRef>
-        get() = prefs.getString("compare", null)?.let { s -> runCatching { JSONArray(s) }.getOrNull()?.let { a -> (0 until a.length()).mapNotNull { StoreRef.fromJson(a.optJSONObject(it)) } } } ?: emptyList()
+        get() = prefs.getString("compare", null)?.let { s -> runCatching { JSONArray(s) }.getOrNull()?.let { a -> (0 until a.length()).mapNotNull { StoreRef.fromJson(a.optJSONObject(it))?.let(::tidy) } } } ?: emptyList()
         set(v) { prefs.edit().putString("compare", JSONArray(v.map { it.toJson() }).toString()).apply() }
+
+    private fun tidy(s: StoreRef) = if (s.chain == Chain.WOOLWORTHS) StoreRef(Chain.WOOLWORTHS, "", "Woolworths (national prices)") else s
 
     val allStores get() = (listOf(store) + compare).distinctBy { it.chain to it.id }
 
